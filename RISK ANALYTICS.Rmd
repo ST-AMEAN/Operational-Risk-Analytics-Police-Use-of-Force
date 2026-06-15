@@ -1,0 +1,691 @@
+---
+title: 'Operational Risk Analytics Using Incident Data'
+subtitle: "Identifying Spatial, Temporal and Workforce Patterns to Support Operational Decision-making"
+author: "Suracha Thansrichai"
+date: "2026-06-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, comment = NULL) 
+
+# The list below to load all the useful packages required for your analyses:
+#====================================================================================
+#install.packages("_____") ## install any package with this 
+
+library(dsEssex)
+library(leaflet)
+library(sf)
+library(tidyr)
+library(tidyverse)
+library(ggmap)
+library(knitr)
+library(lubridate)
+library(zoo)
+library(corrplot)
+library(ggcorrplot)
+library(plotly)
+
+```
+## Executive Summary
+  Operational incident data provides valuable insights into organisational performance, resource allocation, and risk management. However, identifying meaningful patterns within large operational datasets requires structured data analysis and effective visualisation. This project presents an end-to-end operational analytics case study using a real-world public incident dataset from Dallas, Texas. The analysis applies exploratory data analysis (EDA), geospatial analysis, temporal trend analysis, demographic segmentation, and workforce analytics to identify operational hotspots, investigate incident patterns, and generate actionable recommendations for operational planning.
+Rather than focusing solely on descriptive statistics, the project demonstrates how data analytics can support evidence-based decision-making by transforming raw incident records into business intelligence.
+
+## Problem
+ Organisations frequently collect operational incident data, yet decision-makers often struggle to answer questions such as:
+
+* Where are operational incidents most concentrated?
+* Are incidents increasing or decreasing over time?
+* Which operational categories require the greatest attention?
+* Do workforce characteristics influence incident patterns?
+* How can analytical insights improve operational planning and resource allocation?
+
+This project demonstrates how an analytical workflow can answer these questions using real-world operational data.
+
+## Project Objectives
+The objectives of this project are to:
+
+* Identify operational hotspots using geospatial analysis.
+* Analyse temporal patterns and seasonal trends in incident occurrence.
+* Explore demographic and operational characteristics associated with incidents.
+* Evaluate workforce experience distributions.
+* Produce actionable recommendations through data-driven insights.
+
+---
+
+## Data Preparation
+ Before performing any analysis, the dataset was inspected for structural consistency and cleaned to ensure reliable results. This included removing duplicate header rows, validating data types, and preparing separate analytical datasets for geospatial, temporal, and demographic analyses.
+
+The objective of this stage was to establish a clean and reproducible dataset that supports accurate visualisation and evidence-based interpretation throughout the project.
+
+```{r data}
+# load the data
+# =========================
+police_data <- read.csv("37-00049_UOF-P_2016_prepped.csv")
+police_data_new <- slice(police_data, -1) # removes the first row since it similar to heading
+
+```
+  
+---
+
+## Operational Hotspot Analysis
+
+  This analysis evaluates the spatial distribution of the use of force by in Dallas, Texas. To accomplish this, a scatter plot of latitude and longitude will be employed to visualize the distribution of incidents. Additionally, the incidents of use of force will be plotted on a map of Dallas to provide a spatially explicit representation of the data. 
+
+##### Scatter plot of latitude/longitude
+```{r data : SPACE Scatter plot}
+# Plot the incidents of use of force on a map
+space_police_data_new <-police_data_new
+
+# Convert coordinates to numeric
+space_police_data_new$LOCATION_LONGITUDE <- as.numeric(space_police_data_new$LOCATION_LONGITUDE)
+space_police_data_new$LOCATION_LATITUDE <- as.numeric(space_police_data_new$LOCATION_LATITUDE)
+
+ggplot(space_police_data_new, aes(x = LOCATION_LONGITUDE, y = LOCATION_LATITUDE)) +
+  geom_point(alpha = 0.5) +
+  coord_equal() +
+  labs(x = "Longitude", y = "Latitude", title = "Use of Force by Location")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+```
+
+ The scatter plot indicates that reported incidents are not uniformly distributed throughout Dallas. Instead, incidents form several spatial clusters, with the highest concentration located near the city centre and surrounding urban districts.
+
+##### Map of All Use of Force Incidents in Dallas, Texas
+```{r data : MAP 1}
+# Select relevant columns for the map
+map_data <- police_data_new %>%
+  select(LOCATION_LATITUDE, LOCATION_LONGITUDE, LOCATION_CITY, LOCATION_STATE, LOCATION_DISTRICT,
+         STREET_NUMBER, STREET_NAME, STREET_DIRECTION, STREET_TYPE,
+         LOCATION_FULL_STREET_ADDRESS_OR_INTERSECTION,
+         INCIDENT_REASON,SUBJECT_OFFENSE,SUBJECT_WAS_ARRESTED,REASON_FOR_FORCE)
+
+# Convert coordinates to numeric
+map_data $LOCATION_LONGITUDE <- as.numeric(map_data$LOCATION_LONGITUDE)
+map_data $LOCATION_LATITUDE <- as.numeric(map_data $LOCATION_LATITUDE)
+
+# Filter out rows with missing or non-numeric values
+map_data <- map_data[complete.cases(map_data[, c("LOCATION_LATITUDE", "LOCATION_LONGITUDE")]), ]
+map_data <- map_data[sapply(map_data$LOCATION_LATITUDE, is.numeric) & sapply(map_data$LOCATION_LONGITUDE, is.numeric), ]
+
+# Map with arrested-non arrested incident
+Map1 <- leaflet(map_data) %>%
+  addTiles() %>%
+addCircleMarkers(~LOCATION_LONGITUDE, ~LOCATION_LATITUDE,
+                 data = map_data[map_data$SUBJECT_WAS_ARRESTED=="Yes",], group = "Yes",    
+                 popup = ~paste("Location: ", LOCATION_CITY, "<br>",
+                   "State: ", LOCATION_STATE, "<br>",
+                   "Incident Type: ", INCIDENT_REASON,"<br>",
+                   "Offense: ", SUBJECT_OFFENSE,"<br>",
+                   "ARRESTED: ", SUBJECT_WAS_ARRESTED  ))%>%
+  addCircleMarkers(~LOCATION_LONGITUDE, ~LOCATION_LATITUDE,
+                   data = map_data[map_data$SUBJECT_WAS_ARRESTED=="No",], group = "No",color="red",
+                   popup = ~paste("Location: ", LOCATION_CITY, "<br>",
+                   "State: ", LOCATION_STATE, "<br>",
+                   "Incident Type: ", INCIDENT_REASON,"<br>",
+                   "Offense: ", SUBJECT_OFFENSE,"<br>",
+                   "UOF Reason: ", REASON_FOR_FORCE,"<br>",
+                   "ARRESTED: ", SUBJECT_WAS_ARRESTED  ))
+Map1
+
+```
+ 
+ The interactive map confirms that reported incidents are geographically clustered rather than randomly distributed. The greatest concentration occurs within central Dallas, with additional clusters extending toward neighbouring urban areas. Such spatial concentration suggests that operational demand is uneven across the city and may require targeted resource deployment.
+ 
+##### Proportion of Arrested and Non-Arrested Incidents
+```{r data : Table of arrested poportion} 
+####
+# Create a table with frequency and percentage of SUBJECT_WAS_ARRESTED
+arrested_table <- police_data_new %>%
+  group_by(SUBJECT_WAS_ARRESTED) %>%
+  summarize(freq = n()) %>%
+  mutate(percentage = paste0(round(freq/sum(freq)*100, 1), "%"))
+
+# Print the table
+kable(arrested_table, col.names = c("Subject Arrested", "Frequency", "Percentage"))
+
+
+
+```
+
+  As shown on the maps and Table above, the use of force incidents in the city are not evenly spread out, with a higher concentration observed in the downtown area. Although most reported use-of-force incidents resulted in an arrest (85.9%), a notable proportion (14.1%) did not. These incidents may warrant further operational review to better understand the circumstances surrounding use-of-force events that did not result in an arrest.
+
+##### Operational Implications
+- Resource deployment: Spatial hotspots can inform patrol planning, supervisory allocation, and deployment of specialised units to areas with consistently higher operational demand.
+- Risk monitoring: Combining geographic hotspots with temporal patterns and incident categories can help identify recurring operational risks and support more proactive operational planning.
+- Operational review: The presence of use-of-force incidents that did not result in an arrest suggests opportunities for further case review to better understand operational decision-making and identify potential training or policy improvement needs.
+
+
+---
+
+## Temporal Trend Analysis
+ This section examines temporal patterns in reported use-of-force incidents to identify changes in incident frequency over time. Monthly incident counts are aggregated and visualised using a time-series plot to assess overall trends and potential seasonal variation.
+
+```{r data : Time serise }
+# Create df for Time serise 
+TS_police_data_new <- police_data_new
+
+# Convert INCIDENT_DATE and INCIDENT_TIME to datetime
+TS_police_data_new$datetime <- as.POSIXct(paste(police_data_new$INCIDENT_DATE, TS_police_data_new$INCIDENT_TIME), format="%m/%d/%y %I:%M:%S %p")
+
+# Convert ARRESTS to numeric (binary)
+TS_police_data_new$SUBJECT_WAS_ARRESTED <- ifelse(TS_police_data_new$SUBJECT_WAS_ARRESTED == "Yes", 1, 0)
+
+# Aggregate the number of arrests by month
+arrests_monthly <- aggregate(SUBJECT_WAS_ARRESTED ~ format(datetime, "%Y-%m"), data = TS_police_data_new, FUN = sum)
+
+# Convert the aggregated data into a time series object
+arrests_ts <- ts(arrests_monthly$SUBJECT_WAS_ARRESTED, start = c(2016, 1), frequency = 12)
+
+# Convert time index to yearmon format
+time_index <- as.yearmon(time(arrests_ts))
+
+# Create data frame for ggplot
+df <- data.frame(month = time_index, arrests = c(arrests_ts))
+
+# Create plot with smoothing line
+ggplot(df, aes(x = month, y = arrests)) +
+  geom_line() +
+  geom_smooth(se = FALSE) +
+  scale_x_yearmon(format = "%b %Y") +
+  labs(x = "Month", y = "Number of Arrests", title = "Arrests over Time")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+```
+
+##### Key Findings
+- Monthly arrest-related use-of-force incidents generally declined throughout 2016, despite a temporary increase during August and September.
+- The highest number of arrests occurred in February (224 incidents), while the lowest was recorded in December (91 incidents).
+- The overall downward trend suggests that operational demand varied across the year and may reflect seasonal or organisational factors influencing reported incidents.
+As this analysis covers a single calendar year, additional historical data would be required to determine whether these patterns are consistent over time.
+ 
+##### Operational Implications
+- **Resource planning** : Understanding monthly fluctuations can support workforce planning by anticipating periods of higher operational demand.
+- **Performance monitoring** : Tracking incident trends over time enables organisations to identify unusual increases or decreases that may require further investigation.
+- **Strategic planning** : Combining temporal trends with spatial and operational analyses can help determine whether specific locations or incident types contribute to seasonal variations.
+
+```{r data :  histogram of incident by hour of the day  }
+## Create a histogram of incident times by hour of the day
+# Create new df and combine INCIDENT_DATE and INCIDENT_TIME columns into a single DateTime column
+datetime_data <- police_data_new
+
+datetime_data <- datetime_data %>%
+  filter(!is.na(mdy_hms(paste(INCIDENT_DATE, INCIDENT_TIME)))) %>%
+  mutate(DateTime = mdy_hms(paste(INCIDENT_DATE, INCIDENT_TIME))) %>%
+  select(-INCIDENT_DATE, -INCIDENT_TIME)
+
+# Create a histogram of incident times by hour of the day
+ggplot(datetime_data, aes(x = hour(DateTime))) +
+  geom_histogram(bins = 24, color = "white", fill = "darkblue") +
+  labs(title = "Frequency of Incidents by Time of Day",
+       x = "Hour of Day",
+       y = "Number of Incidents") +
+  geom_vline(xintercept = 12, color = "red", linetype = "dashed", size = 1)+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+```
+  
+##### Key Findings
+- Reported use-of-force incidents are unevenly distributed throughout the day, with activity increasing noticeably during the late afternoon and evening.
+- Incident frequency rises after approximately **3:00 PM (15:00)** and reaches its highest level at around **8:00 PM (20:00)**.
+- The lowest incident frequency occurs during the early morning hours (approximately **6:00–7:00 AM**), when operational activity is comparatively limited.
+- These findings suggest that the timing of reported incidents follows predictable daily patterns rather than occurring uniformly throughout the day.
+
+##### Operational Implications
+- **Shift planning** : Higher incident volumes during late afternoon and evening hours may justify increased staffing and supervisory presence during these periods.
+- **Operational readiness** : Understanding peak operational hours enables agencies to allocate equipment, specialised units, and support resources more effectively.
+- **Risk management** : Time-of-day patterns can be combined with location and incident-type analyses to identify periods associated with elevated operational demand and support evidence-based scheduling decisions. 
+ 
+---
+
+## Operational Circumstances of Use-of-Force Incidents
+  This section examines the primary operational reasons associated with reported use-of-force incidents. By analysing the frequency of each reported reason, the analysis identifies the operational circumstances under which force is most commonly applied. Understanding these patterns provides insight into incident characteristics and supports evidence-based resource planning, officer training, and policy evaluation.
+
+```{r data : Bar chart of Use of Force Incidents by Reason }
+
+# Create a data frame with counts of each reason for use of force
+df_reason_counts <- police_data_new %>% 
+  filter(REASON_FOR_FORCE != "NULL") %>%
+  group_by(REASON_FOR_FORCE) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  mutate(prop = count/sum(count)) %>%
+  arrange(desc(count))
+
+# Create a bar chart with the new data frame
+ggplot(df_reason_counts, aes(x = reorder(REASON_FOR_FORCE, -count), y = count, fill = REASON_FOR_FORCE)) +
+  geom_bar(stat = "identity", color = "white") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_fill_discrete(name = "Reason for Use of Force") +
+  xlab("Reason for Use of Force") +
+  ylab("Number of Incidents") +
+  ggtitle("Number of Use of Force Incidents by Reason") +
+  coord_flip()+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+```
+ 
+The analysis indicates that Arrest is the predominant reason for the use of force, accounting for approximately **1,050 recorded incidents**, substantially exceeding all other categories. The next most common reasons are **Danger to Self or Others** and **Active Aggression**, each with approximately **350 incidents**, suggesting that use-of-force incidents frequently occur during situations involving immediate safety risks or active resistance.
+
+**Detention/Frisk** and **Weapon Display** represent a secondary group of operational scenarios, each accounting for approximately **200 incidents**, while all remaining categories including **Assault to Other Person**, **Barricaded Person**, **Aggressive Animal**, **Crowd Disbursement**, and **Property Destruction** occur relatively infrequently.
+
+Overall, the distribution demonstrates that the majority of reported use-of-force incidents arise during routine law enforcement activities, particularly arrests and situations involving threats to public or officer safety, rather than rare or exceptional operational events.
+
+##### Operational Implications
+- The high frequency of arrest-related incidents suggests that **arrest procedures should remain a primary focus of officer trainin**g, particularly in relation to de-escalation techniques, communication, and safe subject restraint.
+- The substantial number of incidents involving **active aggression** and **danger to self or others** highlights the importance of maintaining officer readiness for high-risk encounters through scenario-based training and appropriate tactical response protocols.
+- Less frequently occurring incident types, such as **barricaded persons** or **crowd management**, require specialised capabilities rather than large-scale operational resources, supporting a targeted training approach.
+- Monitoring changes in the distribution of incident reasons over time can assist decision-makers in evaluating operational effectiveness, identifying emerging public safety concerns, and informing policy or resource allocation decisions.
+
+---
+
+## Relationship Between Key Operational Variables
+
+  Understanding how operational variables relate to one another helps identify patterns that may influence incident outcomes and supports evidence-based decision-making.
+
+A correlation matrix was used to examine the relationships between key operational characteristics, including personnel injury, subject injury, arrest outcomes, and demographic attributes. While correlation does not imply causation, this analysis provides an overview of how variables move together and highlights relationships that may warrant further investigation.
+
+```{r data : correlation}
+library(dplyr)
+
+# Select variables of interest
+police_data_new_selected <- police_data_new %>%
+  select(OFFICER_INJURY, SUBJECT_INJURY, SUBJECT_WAS_ARRESTED, 
+         SUBJECT_RACE, OFFICER_RACE )
+# Check the structure of the dataframe
+str(police_data_new_selected)
+
+# Convert binary columns to numeric
+police_data_new_selected$OFFICER_INJURY <- ifelse(police_data_new_selected$OFFICER_INJURY == "Yes", 1, 0)
+police_data_new_selected$SUBJECT_INJURY <- ifelse(police_data_new_selected$SUBJECT_INJURY == "Yes", 1, 0)
+police_data_new_selected$SUBJECT_WAS_ARRESTED <- ifelse(police_data_new_selected$SUBJECT_WAS_ARRESTED == "Yes", 1, 0)
+
+# Create new variables for Black race and non-Black race
+police_data_new_selected$OFFICER_BLACK_RACE <- ifelse(police_data_new_selected$OFFICER_RACE == "Black", 1, 0)
+police_data_new_selected$SUBJECT_BLACK_RACE <- ifelse(police_data_new_selected$SUBJECT_RACE == "Black", 1, 0)
+
+# Create new variables for Hispanic race and non-Hispanic race
+police_data_new_selected$OFFICER_HISPANIC_RACE <- ifelse(police_data_new_selected$OFFICER_RACE == "Hispanic", 1, 0)
+police_data_new_selected$SUBJECT_HISPANIC_RACE <- ifelse(police_data_new_selected$SUBJECT_RACE == "Hispanic", 1, 0)
+
+# Create new variables for White race and non-White race
+police_data_new_selected$OFFICER_WHITE_RACE <- ifelse(police_data_new_selected$OFFICER_RACE == "White", 1, 0)
+police_data_new_selected$SUBJECT_WHITE_RACE <- ifelse(police_data_new_selected$SUBJECT_RACE == "White", 1, 0)
+
+# Remove the original variables
+police_data_new_selected <- police_data_new_selected %>%
+  select(-OFFICER_RACE, -SUBJECT_RACE)
+
+# Check the structure of the updated dataframe
+str(police_data_new_selected)
+
+# Calculate the correlation matrix
+cor_matrix <- cor(police_data_new_selected)
+cor_matrix
+
+# Visualize the correlation matrix using a correlogram
+# Set plot size
+options(repr.plot.width = 10, repr.plot.height = 10)
+library(corrplot)
+corrplot(cor_matrix, type="upper", tl.col="black", 
+         tl.srt=30, method="circle", main="\nCorrelation Matrix of Police Dataset")
+```
+
+  The correlation analysis identified several noteworthy relationships between operational variables.
+
+- A **weak positive correlation** was observed between personnel injuries and subject injuries, suggesting that incidents involving one party being injured are slightly more likely to involve injuries to the other party.
+
+- Subject injury showed a **weak positive relationship** with arrest outcomes, indicating that incidents resulting in injury were marginally more likely to conclude with an arrest.
+
+- Demographic variables exhibited only **limited correlations**, suggesting that demographic characteristics alone are not strong predictors of operational outcomes within this dataset.
+
+- Moderate negative correlations between mutually exclusive demographic categories (e.g., Hispanic and White personnel) are expected due to the binary encoding applied during data preparation rather than representing operational behaviour.
+
+Overall, the correlation analysis indicates that most operational variables demonstrate relatively weak linear relationships, highlighting the need for more advanced analytical approaches to better understand the factors associated with operational incidents.
+
+---
+
+## Operational Response Actions Analysis
+
+Operational response actions were analysed to understand how officers responded during use-of-force incidents. Since a single incident may involve multiple response techniques, the response fields (`TYPE_OF_FORCE_USED1`–`TYPE_OF_FORCE_USED10`) were transformed into a long format, enabling each operational action to be analysed independently. This approach provides a more comprehensive view of tactical responses than analysing only the primary recorded action.
+
+A ranked bar chart highlights the most frequently recorded response actions across all incidents, while demographic summary tables compare the distribution of operational responses across subject and officer racial groups.
+
+```{r data : Table, message=FALSE, warning=FALSE}
+df_select <- police_data_new %>% 
+  filter(SUBJECT_RACE != "NULL") %>%
+  select(OFFICER_RACE,SUBJECT_RACE, 
+         TYPE_OF_FORCE_USED1:TYPE_OF_FORCE_USED10, 
+         NUMBER_EC_CYCLES, 
+         FORCE_EFFECTIVE) 
+
+##SUBJECT RACE @ FORCE UESD
+df_summary_sub <- df_select %>% 
+  pivot_longer(cols = starts_with("TYPE_OF_FORCE_USED"), 
+               names_to = "force_type", 
+               values_to = "force_used") %>% 
+  group_by(SUBJECT_RACE, force_type, force_used) %>% 
+  summarize(count = n()) %>%
+  filter(force_used != "") %>%
+  pivot_wider(names_from = force_type, values_from = count, values_fill = 0)
+
+
+df_summary_sub_race <- df_summary_sub  %>%
+  select(-force_used) %>%
+  group_by(SUBJECT_RACE) %>%
+  summarize(across(everything(), sum))
+
+#==============================================================
+# Operational Response Actions by Subject Demographic
+#==============================================================
+
+response_actions <- police_data_new %>%
+  filter(SUBJECT_RACE != "NULL") %>%
+  select(
+    SUBJECT_RACE,
+    starts_with("TYPE_OF_FORCE_USED")
+  ) %>%
+  pivot_longer(
+    cols = starts_with("TYPE_OF_FORCE_USED"),
+    names_to = "response_slot",
+    values_to = "response_action"
+  ) %>%
+  filter(!is.na(response_action), response_action != "")
+
+subject_response_actions <- response_actions %>%
+  group_by(SUBJECT_RACE, response_action) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(
+    names_from = SUBJECT_RACE,
+    values_from = count,
+    values_fill = 0
+  ) %>%
+  arrange(desc(rowSums(across(where(is.numeric)))))
+
+kable(
+  subject_response_actions,
+  caption = "Operational Response Actions by Subject Demographic"
+)
+
+#==============================================================
+# Operational Response Actions by Officer Demographic
+#==============================================================
+
+response_actions <- police_data_new %>%
+  filter(OFFICER_RACE != "NULL") %>%
+  select(
+    OFFICER_RACE,
+    starts_with("TYPE_OF_FORCE_USED")
+  ) %>%
+  pivot_longer(
+    cols = starts_with("TYPE_OF_FORCE_USED"),
+    names_to = "response_slot",
+    values_to = "response_action"
+  ) %>%
+  filter(!is.na(response_action), response_action != "")
+
+officer_response_actions <- response_actions %>%
+  group_by(OFFICER_RACE, response_action) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(
+    names_from = OFFICER_RACE,
+    values_from = count,
+    values_fill = 0
+  ) %>%
+  arrange(desc(rowSums(across(where(is.numeric)))))
+
+kable(
+  officer_response_actions,
+  caption = "Operational Response Actions by Officer Demographic"
+)
+
+#==============================================================
+# Top 15 Operational Response Actions
+#==============================================================
+
+top_actions <- police_data_new %>%
+  select(starts_with("TYPE_OF_FORCE_USED")) %>%
+  pivot_longer(
+    everything(),
+    values_to = "response_action"
+  ) %>%
+  filter(!is.na(response_action),
+         response_action != "") %>%
+  group_by(response_action) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(desc(Count)) %>%
+  slice_head(n = 15)
+
+
+ggplot(top_actions,
+       aes(x = reorder(response_action, Count),
+           y = Count)) +
+
+  geom_col(fill = "#2C7FB8") +
+
+  coord_flip() +
+
+  labs(
+    title = "Top 15 Operational Response Actions",
+    x = NULL,
+    y = "Number of Recorded Actions"
+  ) +
+
+  theme_minimal(base_size = 13)
+
+```
+The analysis shows that **Verbal Command** was the most frequently recorded operational response action. This suggests that many incidents involved verbal direction or communication-based control before progressing to physical intervention.
+
+Physical restraint actions such as **Held Suspect Down**, **BD - Grabbed**, **Joint Locks**, **Hand Controlled Escort**, and **Take Down** techniques were also frequently recorded. This indicates that many incidents involved control and containment actions rather than only one isolated response.
+
+Because each incident can include more than one response action, these results should be interpreted as **counts of recorded actions**, not mutually exclusive incident categories.
+
+The demographic tables show variation in response-action counts across subject and officer demographic groups. However, these are descriptive counts only and should not be interpreted as evidence of different treatment without further analysis controlling for incident type, location, threat level, and other contextual factors.
+
+
+##### Operational Implications
+Understanding the most common operational response actions can support workforce training, policy review, and operational monitoring.
+
+High-frequency actions such as verbal commands and physical restraint techniques should be prioritised in training, documentation standards, and quality review processes.
+
+This analysis also provides a useful baseline for future monitoring. If response patterns change over time, managers can investigate whether the shift is linked to policy changes, training programmes, staffing patterns, or changes in incident characteristics.
+
+---
+
+## Demographic Distribution of Use-of-Force Incidents
+To better understand the demographic composition of reported use-of-force incidents, the dataset was analysed from both the subject and officer perspectives. Incident distributions were summarised by race using proportional visualisations and interaction analysis to identify overall demographic patterns and relationships between officers and subjects involved in reported incidents.
+
+```{r data : demographic-distribution, message=FALSE, warning=FALSE}
+#==============================================================
+# Demographic Distribution of Reported Incidents
+#==============================================================
+
+# Subject demographic distribution
+subject_demo <- police_data_new %>%
+  filter(SUBJECT_RACE != "NULL") %>%
+  count(SUBJECT_RACE, name = "count") %>%
+  mutate(
+    prop = count / sum(count),
+    demographic_group = ifelse(
+      SUBJECT_RACE %in% c("Black", "White", "Hispanic"),
+      as.character(SUBJECT_RACE),
+      "Other"
+    )
+  ) %>%
+  group_by(demographic_group) %>%
+  summarise(
+    count = sum(count),
+    prop = sum(prop),
+    .groups = "drop"
+  )
+
+# Officer demographic distribution
+officer_demo <- police_data_new %>%
+  filter(OFFICER_RACE != "NULL") %>%
+  count(OFFICER_RACE, name = "count") %>%
+  mutate(
+    prop = count / sum(count),
+    demographic_group = ifelse(
+      OFFICER_RACE %in% c("Black", "White", "Hispanic"),
+      as.character(OFFICER_RACE),
+      "Other"
+    )
+  ) %>%
+  group_by(demographic_group) %>%
+  summarise(
+    count = sum(count),
+    prop = sum(prop),
+    .groups = "drop"
+  )
+
+# Combine both distributions for comparison
+demographic_distribution <- bind_rows(
+  subject_demo %>% mutate(group_type = "Subject demographic"),
+  officer_demo %>% mutate(group_type = "Officer demographic")
+)
+
+# 100% stacked bar chart
+ggplot(
+  demographic_distribution,
+  aes(
+    x = group_type,
+    y = prop,
+    fill = demographic_group
+  )
+) +
+  geom_col(width = 0.6, color = "white") +
+  geom_text(
+    aes(label = scales::percent(prop, accuracy = 0.1)),
+    position = position_stack(vjust = 0.5),
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set2", name = "Demographic group") +
+  labs(
+    title = "Demographic Distribution of Reported Incidents",
+    subtitle = "Comparison of subject and officer demographic composition",
+    x = NULL,
+    y = "Share of recorded incidents"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    legend.position = "bottom"
+  )
+
+
+```
+
+The stacked bar chart compares the demographic composition of subjects and officers involved in reported use-of-force incidents. Presenting both groups on a common percentage scale allows for a direct comparison of their relative distributions across the dataset.
+
+- Black subjects represent the largest proportion of reported incidents (56.9%), followed by Hispanic (22.4%) and White subjects (20.1%).
+- In contrast, White officers account for the largest proportion of officers involved in reported incidents (61.7%), followed by Hispanic (20.2%) and Black officers (14.3%).
+- The demographic distributions of subjects and officers differ considerably, indicating that the composition of subjects involved in incidents is not the same as the composition of the officers responding to those incidents.
+- These findings are descriptive and summarise the observed incident records only. They should not be interpreted as evidence of bias or disproportionate treatment without additional contextual information, such as population demographics, deployment patterns, incident types, geographic coverage, and operational assignments.
+
+
+
+```{r data : interact plot }
+#==============================================================
+# The interaction plot / All incident
+#==============================================================
+
+# Subset data to only include relevant columns
+plot_data <-  police_data_new %>% 
+  filter(SUBJECT_RACE != "NULL") %>%
+  select(OFFICER_RACE, SUBJECT_RACE, SUBJECT_WAS_ARRESTED)
+
+# Create frequency table
+freq_table <- table(plot_data$OFFICER_RACE, plot_data$SUBJECT_RACE)
+
+# Convert frequency table to a data frame
+plot_df <- as.data.frame(as.table(freq_table))
+
+# Rename columns
+colnames(plot_df) <- c("OFFICER_RACE", "SUBJECT_RACE", "FREQ")
+
+# Create interactive scatterplot using plotly
+plotly::plot_ly(data = plot_df, x = ~OFFICER_RACE, y = ~SUBJECT_RACE, z = ~FREQ, type = "scatter", mode = "markers",
+                marker = list(size = 2.5*sqrt(plot_df$FREQ)),
+                text = plot_df$FREQ) %>%
+  layout(title = "Number of Incidents by Officer Race and Subject Race",
+         xaxis = list(title = "Officer Race"),
+         yaxis = list(title = "Subject Race"))
+
+```
+
+The interaction plot examines the frequency of reported incidents across combinations of officer and subject demographic groups. Bubble size represents the number of recorded incidents for each officer–subject pairing, allowing the most common demographic interactions to be identified quickly.
+
+- The largest officer–subject combination involved White officers and Black subjects, with 864 recorded incidents.
+- High frequencies were also observed for White officers with Hispanic and White subjects, reflecting the dominant demographic groups within the dataset.
+- Incidents involving smaller demographic groups, such as Asian and American Indian officers or subjects, occurred relatively infrequently.
+
+
+##### Operational Implications
+Comparing subject and officer demographics provides a useful baseline for operational monitoring and transparency. Understanding these demographic patterns helps decision-makers identify where further investigation may be warranted and provides context for subsequent analyses of incident characteristics, response actions, temporal trends, and geographic hotspots.
+
+The interaction plot complements the demographic distribution analysis by showing how officer and subject demographics intersect during reported incidents. Rather than examining officer and subject demographics separately, it highlights which demographic pairings occur most frequently and provides additional context for workforce planning, deployment analysis, and future equity assessments.
+
+---
+
+## Workforce Experience Analysis
+This section examines the distribution of officer years of service among reported use-of-force incidents. The objective is to understand whether recorded incidents are concentrated among officers at particular experience levels.
+
+A density plot was used to visualise the distribution of officer experience. This analysis is descriptive and should be interpreted as the experience profile of officers appearing in the incident dataset, not as a measure of individual likelihood to use force.
+
+```{r data : workforce-experience-analysis, message=FALSE, warning=FALSE }
+
+#==============================================================
+# Workforce Experience Analysis
+#==============================================================
+
+df_officer_years <- police_data_new %>%
+  select(OFFICER_YEARS_ON_FORCE) %>%
+  filter(!is.na(OFFICER_YEARS_ON_FORCE)) %>%
+  mutate(OFFICER_YEARS_ON_FORCE = as.numeric(OFFICER_YEARS_ON_FORCE))
+
+# Create a density plot
+ggplot(df_officer_years, aes(x = OFFICER_YEARS_ON_FORCE)) +
+  geom_density(fill = "#2C7FB8", alpha = 0.35, color = "#1B4F72") +
+  labs(
+    title = "Distribution of Officer Years of Service",
+    subtitle = "Experience profile of officers involved in reported incidents",
+    x = "Years of service",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+```
+
+The density plot indicates a right-skewed distribution of officer experience. Reported use-of-force incidents are concentrated among officers with fewer years of service, particularly within the first ten years.
+
+The distribution gradually declines as years of service increase, although a smaller secondary concentration is visible among officers with approximately 25–27 years of service. This suggests that incidents involve officers across a wide range of experience levels, albeit less frequently among highly experienced officers.
+
+These findings describe the experience profile of officers represented in the incident dataset and should not be interpreted as evidence that less experienced officers are inherently more likely to use force.
+
+
+##### Operational Implications
+Understanding the experience distribution of officers involved in reported incidents can support workforce planning, training, and professional development. If incident records are concentrated among early-career officers, organisations may consider strengthening mentoring programmes, operational coaching, and de-escalation training during the initial years of service.
+
+Further analysis should compare incident records with the overall workforce composition to determine whether particular experience groups are disproportionately represented.
+
+---
+
+## Conclusion
+
+ This project demonstrated how exploratory data analysis and data visualisation can be applied to transform raw operational incident data into meaningful business intelligence. Using the Dallas Police Department use-of-force dataset, the analysis examined spatial, temporal, demographic, operational, and workforce-related patterns to better understand the characteristics of reported incidents.
+
+ Several important operational insights emerged from the analysis. Incident hotspots were concentrated in specific geographic areas, indicating that use-of-force incidents are not evenly distributed across the city. Temporal analysis identified fluctuations in incident frequency throughout the year and across different times of day, suggesting that operational demand varies over time. Demographic analysis revealed clear differences between the distribution of officer and subject characteristics, while response-action analysis showed that most incidents occurred during arrests or situations involving active aggression and immediate safety risks. Finally, workforce analysis indicated that officers involved in reported incidents most commonly had relatively few years of service, providing additional context for understanding workforce experience within the dataset.
+
+ Although these findings provide valuable descriptive insights, they should not be interpreted as evidence of bias, causality, or operational effectiveness. A more comprehensive assessment would require additional contextual information, including officer deployment levels, crime rates, neighbourhood demographics, incident severity, and departmental policies.
+
+ Overall, this project demonstrates how data analytics can support evidence-based decision-making in public safety organisations. By integrating geospatial analysis, time-series analysis, demographic profiling, operational response analysis, and workforce analytics, organisations can better identify operational patterns, prioritise resources, evaluate existing practices, and support transparent, data-informed decision-making. The analytical workflow presented in this report can be readily adapted to other operational datasets where understanding incident patterns is critical for improving organisational performance.
+
+
+
+
+
