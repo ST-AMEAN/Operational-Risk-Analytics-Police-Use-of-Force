@@ -10,7 +10,7 @@ The objective is to demonstrate how operational incident data can be transformed
 Rather than focusing solely on descriptive statistics, the project investigates operational patterns across multiple analytical dimensions to support evidence-based decision-making.
 
 
-![Alt text here](preview-risk analytics.png)
+![preview-risk analytics.png](https://github.com/ST-AMEAN/Operational-Risk-Analytics-Police-Use-of-Force/blob/main/preview-risk%20analytics.png?raw=true)
 
 
 ## Objectives
