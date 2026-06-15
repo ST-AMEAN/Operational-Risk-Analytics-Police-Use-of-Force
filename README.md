@@ -23,14 +23,16 @@ Center for Policing Equity (CPE)
 Dallas Police Department Use-of-Force Dataset (2016)
 
 ## Analytical Workflow
-✔ Data Cleaning
-✔ Exploratory Data Analysis
-✔ Geospatial Analysis
-✔ Time Series Analysis
-✔ Demographic Analysis
-✔ Operational Response Analysis
-✔ Workforce Analytics
-✔ Correlation Analysis
+1. Data Preparation
+2. Exploratory Data Analysis (EDA)
+3. Geospatial Analysis
+4. Time Series Analysis
+5. Operational Circumstances Analysis
+6. Correlation Analysis
+7. Operational Response Analysis
+8. Demographic Analysis
+9. Workforce Analytics
+10. Operational Insights
 
 ## Key Insights
 - Operational incidents are geographically clustered rather than evenly distributed.
@@ -75,3 +77,4 @@ Bubble Chart (Plotly)
 
 ## Business Value
 This project demonstrates how operational data can be used to identify patterns, support resource allocation, improve situational awareness, and inform operational planning. While the analysis is descriptive rather than causal, it illustrates a practical workflow for transforming raw incident records into meaningful operational insights.
+
